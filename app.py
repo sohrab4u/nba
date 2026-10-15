@@ -1,7 +1,7 @@
 """
 ASHA & Infant Visit Due Monitoring, Healthcare Network & Video Quality Portal
 Enterprise Health Analytics Dashboard for Home Based Newborn Care (HBNC)
-Updated: Added Comprehensive Rejected Video Report (ASHA, Baby, Subcentre, Date, Feedback)
+Visit_Id (Column E) Deduplication Engine: Each doubled Visit_Id is strictly counted as a single visit.
 """
 
 import os
@@ -422,7 +422,7 @@ for dc in ["Registration Date", "DOB", "Last Visit Date"]:
         df_raw[dc] = pd.to_datetime(df_raw[dc], errors="coerce").dt.date
 
 # -----------------------------------------------------------------------------
-# 5. Feedback Preprocessing: DEDUPLICATE DOUBLE RECORDS TO COUNT SINGLE VISITS
+# 5. Feedback Preprocessing: VISIT_ID (COLUMN E) DEDUPLICATION LOGIC
 # -----------------------------------------------------------------------------
 df_fb_cleaned = None
 has_feedback = False
@@ -440,14 +440,15 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
     df_fb = df_fb_raw.copy()
     fb_raw_total_rows = len(df_fb)
     
+    # Map columns accurately (Detect Column E for Visit_Id if name differs)
     fb_col_map = {}
-    for c in df_fb.columns:
+    for idx_col, c in enumerate(df_fb.columns):
         c_clean = str(c).strip().lower()
         if "verdict" in c_clean or "annotation" in c_clean:
             fb_col_map[c] = "Annotation Verdict"
         elif "subcenter" in c_clean or "subcentre" in c_clean:
             fb_col_map[c] = "Subcentre"
-        elif "visit_id" in c_clean or "visit id" in c_clean:
+        elif "visit_id" in c_clean or "visit id" in c_clean or idx_col == 4:
             fb_col_map[c] = "Visit_Id"
         elif "asha" in c_clean:
             fb_col_map[c] = "ASHA"
@@ -461,6 +462,11 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
             fb_col_map[c] = "Sync Date"
     df_fb.rename(columns=fb_col_map, inplace=True)
 
+    if "Visit_Id" in df_fb.columns:
+        df_fb["Visit_Id"] = df_fb["Visit_Id"].astype(str).str.strip()
+    elif len(df_fb.columns) > 4:
+        df_fb["Visit_Id"] = df_fb.iloc[:, 4].astype(str).str.strip()
+
     if "Mother" in df_fb.columns:
         df_fb["Mother"] = df_fb["Mother"].astype(str).str.strip()
     elif len(df_fb.columns) > 5:
@@ -473,13 +479,10 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
     else:
         df_fb["Visit Date Clean"] = None
 
+    # CRITICAL DEDUPLICATION:
+    # Based strictly on Visit_Id (Column E). For each visit two Visit_Ids are present,
+    # so we deduplicate by subset=["Visit_Id"] to count each visit as a single visit.
     if "Visit_Id" in df_fb.columns:
-        df_fb["Visit_Id"] = df_fb["Visit_Id"].astype(str).str.strip()
-
-    # Deduplicate: Same Mother & Visit Date considered as Single Visit
-    if "Mother" in df_fb.columns and "Visit Date Clean" in df_fb.columns:
-        df_fb_cleaned = df_fb.drop_duplicates(subset=["Mother", "Visit Date Clean"], keep="first").copy()
-    elif "Visit_Id" in df_fb.columns:
         df_fb_cleaned = df_fb.drop_duplicates(subset=["Visit_Id"], keep="first").copy()
     else:
         df_fb_cleaned = df_fb.drop_duplicates().copy()
@@ -661,7 +664,7 @@ df_v_filtered = df_v_filtered[
 cohort_baby_ids = df_v_filtered["Baby ID"].unique()
 df_b_filtered = df_b_filtered[df_b_filtered["Baby ID"].isin(cohort_baby_ids)]
 
-# Apply filters synchronously to Deduplicated Feedback Sheet
+# Apply filters synchronously to Deduplicated Feedback Sheet (Based on Visit_Id single visits)
 df_fb_filtered = pd.DataFrame()
 if has_feedback and df_fb_cleaned is not None:
     df_fb_filtered = df_fb_cleaned.copy()
@@ -693,10 +696,10 @@ if sel_asha != "All":
 
 kpi_total_babies = len(df_b_filtered)
 
-# Total Visits Completed calculated from Deduplicated Feedback Sheet
+# Total Visits Completed calculated from Deduplicated Feedback Sheet (Visit_Id based)
 if has_feedback and not df_fb_filtered.empty:
     kpi_total_completed_visits = int(len(df_fb_filtered))
-    completed_caption_text = f"Feedback Sheet ({fb_unique_visits_count} Visits)"
+    completed_caption_text = f"Feedback Sheet ({fb_unique_visits_count} Single Visits)"
 else:
     kpi_total_completed_visits = int(df_b_filtered["Completed Visits Total"].sum())
     completed_caption_text = "Completed up to last visit"
@@ -704,7 +707,7 @@ else:
 kpi_visits_after_reg = int(df_b_filtered["Visits After Reg"].sum())
 kpi_total_pending_visits = int(df_b_filtered["Pending Visits Total"].sum())
 
-# Deduplicated Video Verification KPIs
+# Deduplicated Video Verification KPIs (Visit_Id based)
 if has_feedback and not df_fb_filtered.empty and "Annotation Verdict" in df_fb_filtered.columns:
     kpi_videos_accepted = int((df_fb_filtered["Annotation Verdict"].str.strip().str.lower() == "accepted").sum())
     kpi_videos_rejected = int((df_fb_filtered["Annotation Verdict"].str.strip().str.lower() == "rejected").sum())
@@ -750,7 +753,7 @@ st.markdown(
 )
 
 # --- Tier 1: Registration, Visits & Deduplicated Video Verification ---
-st.markdown('<div class="tier-header">📊 Baby Registrations, Completed Visits & Video Verification</div>', unsafe_allow_html=True)
+st.markdown('<div class="tier-header">📊 Baby Registrations, Completed Visits & Video Verification (Visit_Id Deduplicated)</div>', unsafe_allow_html=True)
 r1, r2, r3, r4, r5, r6 = st.columns(6)
 
 with r1:
@@ -762,9 +765,9 @@ with r3:
 with r4:
     st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #D97706;"><div class="kpi-title">Pending Visits</div><div class="kpi-value" style="color: #D97706;">{kpi_total_pending_visits:,}</div><div class="kpi-caption">Remaining cohort</div></div>', unsafe_allow_html=True)
 with r5:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #10B981;"><div class="kpi-title">Videos Accepted</div><div class="kpi-value" style="color: #10B981;">{kpi_videos_accepted}</div><div class="kpi-caption">Acc. Rate: {video_acc_rate}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #10B981;"><div class="kpi-title">Videos Accepted</div><div class="kpi-value" style="color: #10B981;">{kpi_videos_accepted}</div><div class="kpi-caption">Single Visits | Rate: {video_acc_rate}</div></div>', unsafe_allow_html=True)
 with r6:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #EF4444;"><div class="kpi-title">Videos Rejected</div><div class="kpi-value" style="color: #DC2626;">{kpi_videos_rejected}</div><div class="kpi-caption">Requires re-visit</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #EF4444;"><div class="kpi-title">Videos Rejected</div><div class="kpi-value" style="color: #DC2626;">{kpi_videos_rejected}</div><div class="kpi-caption">Single Visits | Requires re-visit</div></div>', unsafe_allow_html=True)
 
 # --- Tier 2: Healthcare Infrastructure & Daily Cadence ---
 st.markdown('<div class="tier-header">⏱️ Healthcare Network & Operational Daily Schedule</div>', unsafe_allow_html=True)
@@ -927,8 +930,8 @@ with tab_video:
     st.subheader("📹 Video Verification & Quality Feedback Center")
     if has_feedback and not df_fb_filtered.empty:
         st.info(
-            f"ℹ️ **Deduplication Active:** Same Mother & Visit Date duplicates unified into Single Visits. "
-            f"Raw Rows: `{fb_raw_total_rows}` | Single Completed Visits: `{fb_unique_visits_count}` | Filtered Cohort: `{len(df_fb_filtered)}`"
+            f"ℹ️ **Column E (Visit_Id) Deduplication Active:** For each visit, double Visit_Ids are counted as a single visit. "
+            f"Total Raw Rows: `{fb_raw_total_rows}` | Single Visits: `{fb_unique_visits_count}` | Filtered Single Visits: `{len(df_fb_filtered)}`"
         )
 
         col_v1, col_v2 = st.columns([1, 1.2])
@@ -965,9 +968,9 @@ with tab_video:
         st.markdown("---")
         
         # ---------------------------------------------------------------------
-        # DEDICATED REPORT: REJECTED VIDEOS
+        # DEDICATED REPORT: REJECTED VIDEOS (Visit_Id Deduplicated)
         # ---------------------------------------------------------------------
-        st.markdown('<div class="tier-header">🚫 Rejected Videos Actionable Report</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tier-header">🚫 Rejected Videos Actionable Report (Column E Visit_Id Deduplicated)</div>', unsafe_allow_html=True)
         
         df_rejected_report = df_fb_filtered[
             df_fb_filtered["Annotation Verdict"].str.strip().str.lower() == "rejected"
@@ -979,13 +982,14 @@ with tab_video:
             "Mother",
             "Subcentre",
             "Visit Date",
+            "Visit_Id",
             "Rejected Feedback"
         ]
 
         rej_head_c1, rej_head_c2, rej_head_c3 = st.columns([2.2, 0.9, 0.9])
         with rej_head_c1:
             st.markdown(
-                f"**Total Rejected Videos:** `{len(df_rejected_report)}` &nbsp;|&nbsp; "
+                f"**Total Rejected Single Visits:** `{len(df_rejected_report)}` &nbsp;|&nbsp; "
                 f"**ASHAs Requiring Re-recording:** `{df_rejected_report['ASHA'].nunique() if not df_rejected_report.empty else 0}`"
             )
         with rej_head_c2:
@@ -1026,10 +1030,10 @@ with tab_video:
             st.success("🎉 No rejected videos found for the selected filter combination.")
 
         st.markdown("---")
-        st.markdown("**3. Complete Video Feedback Audit Ledger (Single Visits per Mother-Date)**")
+        st.markdown("**3. Complete Video Feedback Audit Ledger (Single Visits per Visit_Id)**")
         
         fb_display_cols = [c for c in [
-            "Mother", "Baby Name", "Visit Date", "Annotation Verdict", "ASHA", "Subcentre", "Visit_Id",
+            "Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date",
             "Weight Video Feedback", "Arc Feedback", "Other Human Feedback", "Baby Cropping Feedback", "Ruler Cropping Feedback"
         ] if c in df_fb_filtered.columns]
 
@@ -1041,7 +1045,7 @@ with tab_video:
             fb_excel = generate_single_table_excel(df_fb_filtered[fb_display_cols], sheet_name="Video_Feedback_Dedup")
             st.download_button(label="📥 Download Complete Audit Excel (.xlsx)", data=fb_excel, file_name=f"Complete_Video_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with fb_col_d2:
-            fb_pdf = generate_pdf_report(df_export=df_fb_filtered, columns_to_show=["Mother", "Baby Name", "Visit Date", "Annotation Verdict", "ASHA", "Subcentre"], report_title="HBNC Complete Video Verification & Feedback Audit", active_filters_desc=active_filters_str)
+            fb_pdf = generate_pdf_report(df_export=df_fb_filtered, columns_to_show=["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date"], report_title="HBNC Complete Video Verification & Feedback Audit", active_filters_desc=active_filters_str)
             st.download_button(label="📄 Download Complete Audit PDF (.pdf)", data=fb_pdf, file_name=f"Complete_Video_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", use_container_width=True)
     else:
         st.info("ℹ️ Video Feedback sheet upload nahi hui hai ya active filters ke matching koi record nahi hai. Kripya sidebar se 'Feedback Sheet' upload karein.")
@@ -1205,12 +1209,12 @@ with tab_export:
             pdf_title = f"HBNC Tomorrow's Scheduled Visits ({tomorrow_date.strftime('%d-%b-%Y')})"
         elif pdf_view_choice == "Rejected Videos Actionable Report":
             pdf_source_df = df_rejected_report
-            cols_to_print = ["ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date", "Rejected Feedback"]
-            pdf_title = "HBNC Actionable Rejected Videos Quality Report"
+            cols_to_print = ["ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date", "Visit_Id", "Rejected Feedback"]
+            pdf_title = "HBNC Actionable Rejected Videos Quality Report (Visit_Id Deduplicated)"
         elif pdf_view_choice == "Complete Video Verification & Quality Feedback":
             pdf_source_df = df_fb_filtered
-            cols_to_print = ["Mother", "Baby Name", "Visit Date", "Annotation Verdict", "ASHA", "Subcentre"]
-            pdf_title = "HBNC Video Verification & Feedback Audit (Mother+Date Single Visits)"
+            cols_to_print = ["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date"]
+            pdf_title = "HBNC Video Verification & Feedback Audit (Visit_Id Single Visits)"
         elif pdf_view_choice == "Baby Registration vs Visit Audit":
             pdf_source_df = df_b_filtered.rename(
                 columns={
