@@ -1,7 +1,7 @@
 """
 ASHA & Infant Visit Due Monitoring, Healthcare Network & Video Quality Portal
 Enterprise Health Analytics Dashboard for Home Based Newborn Care (HBNC)
-Updated: Added Day Before Yesterday (Scheduled, Completed, Missed) with Excel/PDF Exports
+Updated: Added Baby DOB alongside Baby Name across all Reports (Preview, Excel & PDF)
 """
 
 import os
@@ -172,7 +172,10 @@ st.markdown(
 # 2. Export Utility Functions (PDF & Multi-Sheet Excel)
 # -----------------------------------------------------------------------------
 def generate_pdf_report(df_export, columns_to_show, report_title, active_filters_desc):
-    """Generates an executive landscape PDF report matching active filters."""
+    """
+    Generates an executive landscape PDF report matching active filters.
+    Baby ID is strictly excluded from PDF, while Baby Name and DOB are preserved.
+    """
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -187,16 +190,17 @@ def generate_pdf_report(df_export, columns_to_show, report_title, active_filters
     elements = []
     title_style = ParagraphStyle(
         name="DocTitle",
-        fontSize=13,
-        leading=16,
+        fontSize=13.5,
+        leading=16.5,
         textColor=colors.HexColor("#1E3A8A"),
         fontName="Helvetica-Bold",
     )
     meta_style = ParagraphStyle(
         name="DocMeta",
-        fontSize=8,
-        leading=10,
+        fontSize=8.5,
+        leading=11,
         textColor=colors.HexColor("#475569"),
+        fontName="Helvetica",
     )
 
     elements.append(Paragraph(report_title, title_style))
@@ -207,17 +211,21 @@ def generate_pdf_report(df_export, columns_to_show, report_title, active_filters
             meta_style,
         )
     )
-    elements.append(Spacer(1, 6))
+    elements.append(Spacer(1, 5))
     elements.append(
         HRFlowable(
             width="100%",
-            thickness=1,
-            color=colors.HexColor("#CBD5E1"),
+            thickness=1.5,
+            color=colors.HexColor("#1E3A8A"),
             spaceAfter=8,
         )
     )
 
-    valid_cols = [c for c in columns_to_show if c in df_export.columns]
+    # Strictly filter out 'Baby ID' from PDF download
+    valid_cols = [
+        c for c in columns_to_show 
+        if c in df_export.columns and str(c).strip().lower() not in ["baby id", "baby_id", "babyid", "child id", "id"]
+    ]
     df_clean = df_export[valid_cols].copy()
 
     for col in df_clean.columns:
@@ -225,15 +233,21 @@ def generate_pdf_report(df_export, columns_to_show, report_title, active_filters
             df_clean[col] = df_clean[col].dt.strftime("%d-%b-%Y")
         else:
             df_clean[col] = (
-                df_clean[col].astype(str).replace({"nan": "-", "NaT": "-"})
+                df_clean[col].astype(str).replace({"nan": "-", "NaT": "-", "None": "-"})
             )
 
     data = [valid_cols] + df_clean.values.tolist()
-    cell_style = ParagraphStyle(name="CellTxt", fontSize=7.2, leading=8.5)
+    cell_style = ParagraphStyle(
+        name="CellTxt",
+        fontSize=7.5,
+        leading=9.5,
+        fontName="Helvetica",
+        textColor=colors.HexColor("#1E293B"),
+    )
     head_style = ParagraphStyle(
         name="HeadTxt",
-        fontSize=8,
-        leading=10,
+        fontSize=8.5,
+        leading=10.5,
         textColor=colors.whitesmoke,
         fontName="Helvetica-Bold",
     )
@@ -255,10 +269,12 @@ def generate_pdf_report(df_export, columns_to_show, report_title, active_filters
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+            ("TOPPADDING", (0, 0), (-1, 0), 5),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
+            ("TOPPADDING", (0, 1), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
         ])
@@ -271,7 +287,7 @@ def generate_pdf_report(df_export, columns_to_show, report_title, active_filters
 
 
 def generate_single_table_excel(df_table, sheet_name="Data_Export"):
-    """Generates an Excel file for a single dataframe."""
+    """Generates an Excel file for a single dataframe preserving all columns."""
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df_table.to_excel(writer, sheet_name=sheet_name[:30], index=False)
@@ -280,7 +296,7 @@ def generate_single_table_excel(df_table, sheet_name="Data_Export"):
 
 
 def generate_excel_workbook(sheets_dict):
-    """Generates an Excel workbook containing multiple analytical sheets."""
+    """Generates an Excel workbook containing multiple analytical sheets preserving all columns."""
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         for sheet_name, df_sheet in sheets_dict.items():
@@ -400,7 +416,12 @@ if "Baby ID" not in df_raw.columns:
     df_raw["Baby ID"] = [f"B-{i+1:04d}" for i in range(len(df_raw))]
 
 for c in ["District", "PHC", "Subcentre", "ASHA", "Mother"]:
-    df_raw[c] = df_raw[c].astype(str).str.strip().replace({"nan": "Unknown", "": "Unknown"})
+    df_raw[c] = (
+        df_raw[c]
+        .astype(str)
+        .str.strip()
+        .replace({"nan": "Unknown", "": "Unknown"})
+    )
 
 df_raw["Baby Display"] = df_raw.apply(
     lambda r: str(r["Baby"]).strip()
@@ -422,16 +443,22 @@ for dc in ["Registration Date", "DOB", "Last Visit Date"]:
         df_raw[dc] = pd.to_datetime(df_raw[dc], errors="coerce").dt.date
 
 # -----------------------------------------------------------------------------
-# 5. Feedback Preprocessing: VISIT_ID (COLUMN E) DEDUPLICATION LOGIC
+# 5. Feedback Preprocessing: VISIT_ID (COLUMN E) DEDUPLICATION & DOB MAPPING
 # -----------------------------------------------------------------------------
 df_fb_cleaned = None
 has_feedback = False
 fb_raw_total_rows = 0
 fb_unique_visits_count = 0
 
+# Mapping Mother Name to Baby Name and DOB from Calendar Sheet
 mother_to_baby_map = dict(zip(
     df_raw["Mother"].astype(str).str.strip().str.lower(),
     df_raw["Baby Display"]
+))
+
+mother_to_dob_map = dict(zip(
+    df_raw["Mother"].astype(str).str.strip().str.lower(),
+    df_raw["DOB"]
 ))
 
 if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_raw.empty:
@@ -487,12 +514,15 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
         df_fb_cleaned["Visit Date"] = df_fb_cleaned["Visit Date Clean"]
         df_fb_cleaned.drop(columns=["Visit Date Clean"], inplace=True)
 
-    # Attach Baby Name to Feedback Sheet
+    # Attach Baby Name & DOB to Feedback Sheet
     df_fb_cleaned["Baby Name"] = df_fb_cleaned["Mother"].apply(
         lambda m: mother_to_baby_map.get(str(m).strip().lower(), f"Baby of {m}")
     )
+    df_fb_cleaned["DOB"] = df_fb_cleaned["Mother"].apply(
+        lambda m: mother_to_dob_map.get(str(m).strip().lower(), "-")
+    )
 
-    # Compile Comprehensive Rejected Feedback String for Each Record
+    # Compile Comprehensive Rejected Feedback String
     def compile_rejected_reasons(row):
         reasons = []
         wv = str(row.get("Weight Video Feedback", ""))
@@ -592,6 +622,7 @@ visit_records = []
 for _, row in df_raw.iterrows():
     lvd = row["Last Visit Date"] if ("Last Visit Date" in row and pd.notna(row["Last Visit Date"])) else None
     reg_d = row["Registration Date"] if ("Registration Date" in row and pd.notna(row["Registration Date"])) else None
+    dob_val = row["DOB"] if ("DOB" in row and pd.notna(row["DOB"])) else None
 
     for stage in due_cols:
         d_val = row[stage]
@@ -614,7 +645,7 @@ for _, row in df_raw.iterrows():
                 "District": row["District"],
                 "PHC": row["PHC"],
                 "Subcentre": row["Subcentre"],
-                "DOB": row.get("DOB"),
+                "DOB": dob_val,
                 "Registration Date": reg_d,
                 "Last Visit Date": lvd,
                 "Visit Stage": stage,
@@ -780,7 +811,7 @@ with r5:
 with r6:
     st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #EF4444;"><div class="kpi-title">Videos Rejected</div><div class="kpi-value" style="color: #DC2626;">{kpi_videos_rejected}</div><div class="kpi-caption">Single Visits | Requires re-visit</div></div>', unsafe_allow_html=True)
 
-# --- Tier 2: Healthcare Infrastructure & Daily Cadence (Now Including Day Before Yesterday) ---
+# --- Tier 2: Healthcare Infrastructure & Daily Cadence ---
 st.markdown('<div class="tier-header">⏱️ Operational Daily Schedule & Healthcare Infrastructure</div>', unsafe_allow_html=True)
 d1, d2, d3, d4, d5, d6, d7, d8 = st.columns(8)
 
@@ -816,10 +847,12 @@ tab_daily, tab_video, tab_reg_audit, tab_network, tab_baby_master, tab_trends, t
     "📥 Download Filtered Reports",
 ])
 
-cols_roster_display = ["Baby Display", "Baby ID", "Mother", "ASHA", "District", "PHC", "Subcentre", "Visit Stage", "Due Date"]
-df_dby_missed_roster = v_day_before_yesterday[v_day_before_yesterday["Visit Status"] == "Missed"].copy()
+# Roster columns: Includes Baby Name and DOB
+cols_roster_preview = ["Baby Display", "DOB", "Baby ID", "Mother", "ASHA", "District", "PHC", "Subcentre", "Visit Stage", "Due Date"]
+cols_roster_pdf_base = ["Baby Name", "DOB", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
+
 df_dby_all_roster = v_day_before_yesterday.copy()
-df_yest_missed_roster = v_yesterday[v_yesterday["Visit Status"] == "Missed"].copy()
+df_yest_all_roster = v_yesterday.copy()
 df_today_sched_roster = v_today.copy()
 df_tom_sched_roster = v_tomorrow.copy()
 
@@ -876,51 +909,87 @@ with tab_daily:
             st.bar_chart(df_comp.set_index("Day")["Scheduled Visits"])
 
     st.markdown("---")
-    st.markdown('<div class="tier-header">📋 Baby-Wise Detailed Daily Rosters & Direct Exports</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tier-header">📋 Baby-Wise Detailed Daily Rosters & Direct Exports (With Baby Name & DOB)</div>', unsafe_allow_html=True)
 
-    # Section A0: Day Before Yesterday's (Parso) Visits
+    # Section A: Day Before Yesterday's (Parso) Visits
     st.markdown(f'<div class="sub-section-header">A. Day Before Yesterday\'s (Parso) Visits ({day_before_yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
     dby_info_col, dby_btn_col1, dby_btn_col2 = st.columns([2.2, 0.9, 0.9])
     with dby_info_col:
         st.markdown(
             f"**Scheduled Visits:** `{kpi_dby_scheduled}` &nbsp;|&nbsp; "
             f"**Completed Visits:** `{kpi_dby_completed}` &nbsp;|&nbsp; "
-            f"**Missed Visits:** `{kpi_dby_missed}` (Affected Babies: `{df_dby_missed_roster['Baby ID'].nunique() if not df_dby_missed_roster.empty else 0}`)"
+            f"**Missed Visits:** `{kpi_dby_missed}`"
         )
     with dby_btn_col1:
         if not df_dby_all_roster.empty:
-            dby_excel_bytes = generate_single_table_excel(df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), sheet_name="Day_Before_Yesterday")
+            dby_excel_bytes = generate_single_table_excel(
+                df_dby_all_roster[cols_roster_preview + ["Visit Status"]].rename(
+                    columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}
+                ),
+                sheet_name="Day_Before_Yesterday",
+            )
             st.download_button(label="📥 Excel (.xlsx)", data=dby_excel_bytes, file_name=f"Day_Before_Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_dby_excel", use_container_width=True)
     with dby_btn_col2:
         if not df_dby_all_roster.empty:
-            dby_pdf_bytes = generate_pdf_report(df_export=df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), columns_to_show=["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Visit Status"], report_title=f"HBNC Day Before Yesterday Visits ({day_before_yesterday_date.strftime('%d-%b-%Y')})", active_filters_desc=active_filters_str)
+            dby_pdf_bytes = generate_pdf_report(
+                df_export=df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}),
+                columns_to_show=cols_roster_pdf_base + ["Outcome"],
+                report_title=f"HBNC Day Before Yesterday Visits ({day_before_yesterday_date.strftime('%d-%b-%Y')})",
+                active_filters_desc=active_filters_str,
+            )
             st.download_button(label="📄 PDF (.pdf)", data=dby_pdf_bytes, file_name=f"Day_Before_Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_dby_pdf", use_container_width=True)
 
     if not df_dby_all_roster.empty:
-        st.dataframe(df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date", "Visit Status": "Outcome"}), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_dby_all_roster[cols_roster_preview + ["Visit Status"]].rename(
+                columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date", "Visit Status": "Outcome"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info(f"ℹ️ No visits were scheduled on the day before yesterday ({day_before_yesterday_date.strftime('%d-%b-%Y')}) under the current filter selection.")
 
     st.markdown("---")
 
-    # Section B: Yesterday's Missed Visits
-    st.markdown(f'<div class="sub-section-header">B. Yesterday\'s Missed Visits ({yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
-    ym_info_col, ym_btn_col1, ym_btn_col2 = st.columns([2.2, 0.9, 0.9])
-    with ym_info_col:
-        st.markdown(f"**Total Missed Visits:** `{len(df_yest_missed_roster)}` &nbsp;|&nbsp; **Affected Unique Babies:** `{df_yest_missed_roster['Baby ID'].nunique() if not df_yest_missed_roster.empty else 0}`")
-    with ym_btn_col1:
-        if not df_yest_missed_roster.empty:
-            ym_excel_bytes = generate_single_table_excel(df_yest_missed_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), sheet_name="Yesterday_Missed")
-            st.download_button(label="📥 Excel (.xlsx)", data=ym_excel_bytes, file_name=f"Yesterday_Missed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_ym_excel", use_container_width=True)
-    with ym_btn_col2:
-        if not df_yest_missed_roster.empty:
-            ym_pdf_bytes = generate_pdf_report(df_export=df_yest_missed_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), columns_to_show=["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"], report_title=f"HBNC Yesterday's Missed Visits ({yesterday_date.strftime('%d-%b-%Y')})", active_filters_desc=active_filters_str)
-            st.download_button(label="📄 PDF (.pdf)", data=ym_pdf_bytes, file_name=f"Yesterday_Missed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_ym_pdf", use_container_width=True)
+    # Section B: Yesterday's Visits with Outcome Column (Completed or Missed)
+    st.markdown(f'<div class="sub-section-header">B. Yesterday\'s Visits Report ({yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
+    yest_info_col, yest_btn_col1, yest_btn_col2 = st.columns([2.2, 0.9, 0.9])
+    with yest_info_col:
+        st.markdown(
+            f"**Scheduled Visits:** `{kpi_yest_scheduled}` &nbsp;|&nbsp; "
+            f"**Completed Visits:** `{kpi_yest_completed}` &nbsp;|&nbsp; "
+            f"**Missed Visits:** `{kpi_yest_missed}`"
+        )
+    with yest_btn_col1:
+        if not df_yest_all_roster.empty:
+            ym_excel_bytes = generate_single_table_excel(
+                df_yest_all_roster[cols_roster_preview + ["Visit Status"]].rename(
+                    columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}
+                ),
+                sheet_name="Yesterday_Visits",
+            )
+            st.download_button(label="📥 Excel (.xlsx)", data=ym_excel_bytes, file_name=f"Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_ym_excel", use_container_width=True)
+    with yest_btn_col2:
+        if not df_yest_all_roster.empty:
+            ym_pdf_bytes = generate_pdf_report(
+                df_export=df_yest_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}),
+                columns_to_show=cols_roster_pdf_base + ["Outcome"],
+                report_title=f"HBNC Yesterday's Visits & Outcomes ({yesterday_date.strftime('%d-%b-%Y')})",
+                active_filters_desc=active_filters_str,
+            )
+            st.download_button(label="📄 PDF (.pdf)", data=ym_pdf_bytes, file_name=f"Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_ym_pdf", use_container_width=True)
 
-    if not df_yest_missed_roster.empty:
-        st.dataframe(df_yest_missed_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date"}), use_container_width=True, hide_index=True)
+    if not df_yest_all_roster.empty:
+        st.dataframe(
+            df_yest_all_roster[cols_roster_preview + ["Visit Status"]].rename(
+                columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date", "Visit Status": "Outcome"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
-        st.success(f"🎉 No visits were missed yesterday ({yesterday_date.strftime('%d-%b-%Y')}) under the current filter selection.")
+        st.info(f"ℹ️ No visits were scheduled for yesterday ({yesterday_date.strftime('%d-%b-%Y')}) under the current filter selection.")
 
     st.markdown("---")
 
@@ -931,15 +1000,29 @@ with tab_daily:
         st.markdown(f"**Total Scheduled Visits:** `{len(df_today_sched_roster)}` &nbsp;|&nbsp; **Unique Babies Scheduled:** `{df_today_sched_roster['Baby ID'].nunique() if not df_today_sched_roster.empty else 0}`")
     with t_btn_col1:
         if not df_today_sched_roster.empty:
-            t_excel_bytes = generate_single_table_excel(df_today_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), sheet_name="Today_Scheduled")
+            t_excel_bytes = generate_single_table_excel(
+                df_today_sched_roster[cols_roster_preview].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+                sheet_name="Today_Scheduled",
+            )
             st.download_button(label="📥 Excel (.xlsx)", data=t_excel_bytes, file_name=f"Today_Scheduled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_t_excel", use_container_width=True)
     with t_btn_col2:
         if not df_today_sched_roster.empty:
-            t_pdf_bytes = generate_pdf_report(df_export=df_today_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), columns_to_show=["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"], report_title=f"HBNC Today's Scheduled Visits ({today_date.strftime('%d-%b-%Y')})", active_filters_desc=active_filters_str)
+            t_pdf_bytes = generate_pdf_report(
+                df_export=df_today_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+                columns_to_show=cols_roster_pdf_base,
+                report_title=f"HBNC Today's Scheduled Visits ({today_date.strftime('%d-%b-%Y')})",
+                active_filters_desc=active_filters_str,
+            )
             st.download_button(label="📄 PDF (.pdf)", data=t_pdf_bytes, file_name=f"Today_Scheduled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_t_pdf", use_container_width=True)
 
     if not df_today_sched_roster.empty:
-        st.dataframe(df_today_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date"}), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_today_sched_roster[cols_roster_preview].rename(
+                columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info(f"ℹ️ No visits are scheduled for today ({today_date.strftime('%d-%b-%Y')}) under the current filter selection.")
 
@@ -952,15 +1035,29 @@ with tab_daily:
         st.markdown(f"**Total Scheduled Visits:** `{len(df_tom_sched_roster)}` &nbsp;|&nbsp; **Unique Babies Expected:** `{df_tom_sched_roster['Baby ID'].nunique() if not df_tom_sched_roster.empty else 0}`")
     with tom_btn_col1:
         if not df_tom_sched_roster.empty:
-            tom_excel_bytes = generate_single_table_excel(df_tom_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), sheet_name="Tomorrow_Scheduled")
+            tom_excel_bytes = generate_single_table_excel(
+                df_tom_sched_roster[cols_roster_preview].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+                sheet_name="Tomorrow_Scheduled",
+            )
             st.download_button(label="📥 Excel (.xlsx)", data=tom_excel_bytes, file_name=f"Tomorrow_Scheduled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_tom_excel", use_container_width=True)
     with tom_btn_col2:
         if not df_tom_sched_roster.empty:
-            tom_pdf_bytes = generate_pdf_report(df_export=df_tom_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), columns_to_show=["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"], report_title=f"HBNC Tomorrow's Scheduled Visits ({tomorrow_date.strftime('%d-%b-%Y')})", active_filters_desc=active_filters_str)
+            tom_pdf_bytes = generate_pdf_report(
+                df_export=df_tom_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+                columns_to_show=cols_roster_pdf_base,
+                report_title=f"HBNC Tomorrow's Scheduled Visits ({tomorrow_date.strftime('%d-%b-%Y')})",
+                active_filters_desc=active_filters_str,
+            )
             st.download_button(label="📄 PDF (.pdf)", data=tom_pdf_bytes, file_name=f"Tomorrow_Scheduled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_tom_pdf", use_container_width=True)
 
     if not df_tom_sched_roster.empty:
-        st.dataframe(df_tom_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date"}), use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_tom_sched_roster[cols_roster_preview].rename(
+                columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info(f"ℹ️ No visits are scheduled for tomorrow ({tomorrow_date.strftime('%d-%b-%Y')}) under the current filter selection.")
 
@@ -1013,9 +1110,11 @@ with tab_video:
             df_fb_filtered["Annotation Verdict"].str.strip().str.lower() == "rejected"
         ].copy()
 
+        # Includes ASHA, Baby Name, DOB, Mother, Subcentre, Visit Date, Visit_Id, Rejected Feedback
         rej_cols_display = [
             "ASHA",
             "Baby Name",
+            "DOB",
             "Mother",
             "Subcentre",
             "Visit Date",
@@ -1042,9 +1141,10 @@ with tab_video:
                 )
         with rej_head_c3:
             if not df_rejected_report.empty:
+                # PDF report excludes Baby ID, includes Baby Name & DOB
                 rej_pdf = generate_pdf_report(
                     df_export=df_rejected_report,
-                    columns_to_show=rej_cols_display,
+                    columns_to_show=["ASHA", "Baby Name", "DOB", "Mother", "Subcentre", "Visit Date", "Visit_Id", "Rejected Feedback"],
                     report_title="HBNC Actionable Rejected Videos Quality Report",
                     active_filters_desc=active_filters_str,
                 )
@@ -1070,7 +1170,7 @@ with tab_video:
         st.markdown("**3. Complete Video Feedback Audit Ledger (Single Visits per Visit_Id)**")
         
         fb_display_cols = [c for c in [
-            "Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date",
+            "Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "DOB", "Mother", "Subcentre", "Visit Date",
             "Weight Video Feedback", "Arc Feedback", "Other Human Feedback", "Baby Cropping Feedback", "Ruler Cropping Feedback"
         ] if c in df_fb_filtered.columns]
 
@@ -1082,7 +1182,12 @@ with tab_video:
             fb_excel = generate_single_table_excel(df_fb_filtered[fb_display_cols], sheet_name="Video_Feedback_Dedup")
             st.download_button(label="📥 Download Complete Audit Excel (.xlsx)", data=fb_excel, file_name=f"Complete_Video_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with fb_col_d2:
-            fb_pdf = generate_pdf_report(df_export=df_fb_filtered, columns_to_show=["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date"], report_title="HBNC Complete Video Verification & Feedback Audit", active_filters_desc=active_filters_str)
+            fb_pdf = generate_pdf_report(
+                df_export=df_fb_filtered, 
+                columns_to_show=["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "DOB", "Mother", "Subcentre", "Visit Date"], 
+                report_title="HBNC Complete Video Verification & Feedback Audit", 
+                active_filters_desc=active_filters_str
+            )
             st.download_button(label="📄 Download Complete Audit PDF (.pdf)", data=fb_pdf, file_name=f"Complete_Video_Audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", use_container_width=True)
     else:
         st.info("ℹ️ Video Feedback sheet upload nahi hui hai ya active filters ke matching koi record nahi hai. Kripya sidebar se 'Feedback Sheet' upload karein.")
@@ -1090,7 +1195,7 @@ with tab_video:
 # TAB 3: Registration & Visit Audit
 with tab_reg_audit:
     st.subheader("🔍 Registration Date vs. Visit Date Audit (Baby-Wise Detailed Audit)")
-    reg_audit_cols = ["Baby Display", "Baby ID", "Mother", "ASHA", "PHC", "Subcentre", "DOB", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total"]
+    reg_audit_cols = ["Baby Display", "DOB", "Baby ID", "Mother", "ASHA", "PHC", "Subcentre", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total"]
     st.dataframe(
         df_b_filtered[reg_audit_cols].rename(
             columns={"Baby Display": "Baby Name", "PHC": "Facility", "Completed Visits Total": "Total Visits Done", "Visits After Reg": "Visits After Registration", "Pending Visits Total": "Pending Visits (Remaining)"}
@@ -1132,7 +1237,7 @@ with tab_network:
         df_drill_infants = df_b_filtered[df_b_filtered["ASHA"] == selected_drill_asha].copy()
         st.caption(f"Displaying **{len(df_drill_infants)}** baby record(s) assigned to **{selected_drill_asha}**.")
         st.dataframe(
-            df_drill_infants[["Baby Display", "Baby ID", "Mother", "District", "PHC", "Subcentre", "DOB", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total"]].rename(columns={"Baby Display": "Baby Name", "Completed Visits Total": "Completed Visits", "Visits After Reg": "Visits After Reg", "Pending Visits Total": "Pending Visits"}).sort_values(by="Completed Visits", ascending=False),
+            df_drill_infants[["Baby Display", "DOB", "Baby ID", "Mother", "District", "PHC", "Subcentre", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total"]].rename(columns={"Baby Display": "Baby Name", "Completed Visits Total": "Completed Visits", "Visits After Reg": "Visits After Reg", "Pending Visits Total": "Pending Visits"}).sort_values(by="Completed Visits", ascending=False),
             use_container_width=True,
             hide_index=True,
         )
@@ -1159,7 +1264,7 @@ with tab_network:
 # TAB 5: Baby Master Ledger
 with tab_baby_master:
     st.subheader("👶 Individual Baby Master List & Accurate Missed Visit Breakdown")
-    baby_master_cols = ["Baby Display", "Baby ID", "Mother", "ASHA", "District", "PHC", "Subcentre", "DOB", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total", "Missed Visits Count"]
+    baby_master_cols = ["Baby Display", "DOB", "Baby ID", "Mother", "ASHA", "District", "PHC", "Subcentre", "Registration Date", "Last Visit Date", "Completed Visits Total", "Visits After Reg", "Pending Visits Total", "Missed Visits Count"]
     st.dataframe(
         df_b_filtered[baby_master_cols].rename(columns={"Baby Display": "Baby Name", "Completed Visits Total": "Completed Visits", "Visits After Reg": "Visits After Reg", "Pending Visits Total": "Pending Visits", "Missed Visits Count": "Missed Visits (Exact Sum)"}).sort_values(by=["Missed Visits (Exact Sum)", "Baby Name"], ascending=[False, True]),
         use_container_width=True,
@@ -1201,13 +1306,14 @@ with tab_export:
     d_col1, d_col2 = st.columns(2)
     with d_col1:
         st.markdown("#### 📗 Multi-Sheet Excel Workbook (.xlsx)")
+        # Excel workbook preserves all columns (including Baby ID and DOB)
         export_sheets = {
             "Baby_Master_Filtered": df_b_filtered[baby_master_cols].rename(columns={"Baby Display": "Baby Name"}),
-            "Day_Before_Yesterday_Visits": df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
-            "Yesterday_Missed": df_yest_missed_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
-            "Today_Scheduled": df_today_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
-            "Tomorrow_Scheduled": df_tom_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
-            "All_Filtered_Visits": df_v_filtered[["Due Date", "Baby ID", "Baby Display", "Mother", "ASHA", "PHC", "Subcentre", "Visit Stage", "Visit Status"]].rename(columns={"Baby Display": "Baby Name"}),
+            "Day_Before_Yesterday_Visits": df_dby_all_roster[cols_roster_preview + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}),
+            "Yesterday_Visits": df_yest_all_roster[cols_roster_preview + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"}),
+            "Today_Scheduled": df_today_sched_roster[cols_roster_preview].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+            "Tomorrow_Scheduled": df_tom_sched_roster[cols_roster_preview].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
+            "All_Filtered_Visits": df_v_filtered[["Due Date", "Baby ID", "Baby Display", "DOB", "Mother", "ASHA", "PHC", "Subcentre", "Visit Stage", "Visit Status"]].rename(columns={"Baby Display": "Baby Name"}),
         }
         if has_feedback and not df_fb_filtered.empty:
             export_sheets["Video_Feedback_SingleVisits"] = df_fb_filtered
@@ -1222,7 +1328,7 @@ with tab_export:
         st.markdown("#### 📕 Landscape Printable PDF Report (.pdf)")
         export_choices = [
             "Day Before Yesterday's (Parso) Visits",
-            "Yesterday's Missed Visits",
+            "Yesterday's Visits & Outcomes",
             "Today's Scheduled Visits",
             "Tomorrow's Scheduled Visits",
             "Baby Registration vs Visit Audit",
@@ -1234,29 +1340,30 @@ with tab_export:
             
         pdf_view_choice = st.radio("Select Report Content to Export:", export_choices, index=0)
 
+        # PDF reports strictly include Baby Name and DOB, while omitting Baby ID
         if pdf_view_choice == "Day Before Yesterday's (Parso) Visits":
-            pdf_source_df = df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
-            cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Visit Status"]
+            pdf_source_df = df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"})
+            cols_to_print = ["Baby Name", "DOB", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Outcome"]
             pdf_title = f"HBNC Day Before Yesterday Visits ({day_before_yesterday_date.strftime('%d-%b-%Y')})"
-        elif pdf_view_choice == "Yesterday's Missed Visits":
-            pdf_source_df = df_yest_missed_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
-            cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
-            pdf_title = f"HBNC Yesterday's Missed Visits ({yesterday_date.strftime('%d-%b-%Y')})"
+        elif pdf_view_choice == "Yesterday's Visits & Outcomes":
+            pdf_source_df = df_yest_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC", "Visit Status": "Outcome"})
+            cols_to_print = ["Baby Name", "DOB", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Outcome"]
+            pdf_title = f"HBNC Yesterday's Visits & Outcomes ({yesterday_date.strftime('%d-%b-%Y')})"
         elif pdf_view_choice == "Today's Scheduled Visits":
             pdf_source_df = df_today_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
-            cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
+            cols_to_print = ["Baby Name", "DOB", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
             pdf_title = f"HBNC Today's Scheduled Visits ({today_date.strftime('%d-%b-%Y')})"
         elif pdf_view_choice == "Tomorrow's Scheduled Visits":
             pdf_source_df = df_tom_sched_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
-            cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
+            cols_to_print = ["Baby Name", "DOB", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
             pdf_title = f"HBNC Tomorrow's Scheduled Visits ({tomorrow_date.strftime('%d-%b-%Y')})"
         elif pdf_view_choice == "Rejected Videos Actionable Report":
             pdf_source_df = df_rejected_report
-            cols_to_print = ["ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date", "Visit_Id", "Rejected Feedback"]
+            cols_to_print = ["ASHA", "Baby Name", "DOB", "Mother", "Subcentre", "Visit Date", "Visit_Id", "Rejected Feedback"]
             pdf_title = "HBNC Actionable Rejected Videos Quality Report (Visit_Id Deduplicated)"
         elif pdf_view_choice == "Complete Video Verification & Quality Feedback":
             pdf_source_df = df_fb_filtered
-            cols_to_print = ["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "Mother", "Subcentre", "Visit Date"]
+            cols_to_print = ["Visit_Id", "Annotation Verdict", "ASHA", "Baby Name", "DOB", "Mother", "Subcentre", "Visit Date"]
             pdf_title = "HBNC Video Verification & Feedback Audit (Visit_Id Single Visits)"
         elif pdf_view_choice == "Baby Registration vs Visit Audit":
             pdf_source_df = df_b_filtered.rename(
@@ -1267,11 +1374,11 @@ with tab_export:
                     "Pending Visits Total": "Pending",
                 }
             )
-            cols_to_print = ["Baby Name", "ASHA", "Registration Date", "Last Visit Date", "Completed", "After Reg", "Pending"]
+            cols_to_print = ["Baby Name", "DOB", "ASHA", "Registration Date", "Last Visit Date", "Completed", "After Reg", "Pending"]
             pdf_title = "HBNC Baby Registration vs. Visit Audit Report"
         else:
             pdf_source_df = df_b_filtered
-            cols_to_print = ["Baby Display", "Mother", "ASHA", "PHC", "Subcentre", "DOB", "Missed Visits Count"]
+            cols_to_print = ["Baby Display", "DOB", "Mother", "ASHA", "PHC", "Subcentre", "Missed Visits Count"]
             pdf_title = "HBNC Baby Master & Individual Missed Visits Ledger"
 
         pdf_bytes = generate_pdf_report(df_export=pdf_source_df, columns_to_show=cols_to_print, report_title=pdf_title, active_filters_desc=active_filters_str)
