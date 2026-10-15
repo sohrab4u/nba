@@ -1,7 +1,7 @@
 """
 ASHA & Infant Visit Due Monitoring, Healthcare Network & Video Quality Portal
 Enterprise Health Analytics Dashboard for Home Based Newborn Care (HBNC)
-Visit_Id (Column E) Deduplication Engine: Each doubled Visit_Id is strictly counted as a single visit.
+Updated: Added Day Before Yesterday (Scheduled, Completed, Missed) with Excel/PDF Exports
 """
 
 import os
@@ -107,15 +107,15 @@ st.markdown(
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 8px 10px;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-        height: 80px;
+        height: 78px;
         display: flex;
         flex-direction: column;
         justify-content: center;
     }
     .kpi-title {
-        font-size: 10.5px;
+        font-size: 10px;
         font-weight: 700;
         color: #64748B;
         text-transform: uppercase;
@@ -125,13 +125,13 @@ st.markdown(
         text-overflow: ellipsis;
     }
     .kpi-value {
-        font-size: 21px;
+        font-size: 19px;
         font-weight: 800;
         margin-top: 1px;
         line-height: 1.1;
     }
     .kpi-caption {
-        font-size: 9.5px;
+        font-size: 9px;
         color: #94A3B8;
         margin-top: 2px;
         white-space: nowrap;
@@ -429,7 +429,6 @@ has_feedback = False
 fb_raw_total_rows = 0
 fb_unique_visits_count = 0
 
-# Mapping Mother Name to Baby Name from Calendar Sheet
 mother_to_baby_map = dict(zip(
     df_raw["Mother"].astype(str).str.strip().str.lower(),
     df_raw["Baby Display"]
@@ -440,7 +439,6 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
     df_fb = df_fb_raw.copy()
     fb_raw_total_rows = len(df_fb)
     
-    # Map columns accurately (Detect Column E for Visit_Id if name differs)
     fb_col_map = {}
     for idx_col, c in enumerate(df_fb.columns):
         c_clean = str(c).strip().lower()
@@ -479,9 +477,7 @@ if df_fb_raw is not None and isinstance(df_fb_raw, pd.DataFrame) and not df_fb_r
     else:
         df_fb["Visit Date Clean"] = None
 
-    # CRITICAL DEDUPLICATION:
-    # Based strictly on Visit_Id (Column E). For each visit two Visit_Ids are present,
-    # so we deduplicate by subset=["Visit_Id"] to count each visit as a single visit.
+    # Deduplicate strictly on Visit_Id (Column E)
     if "Visit_Id" in df_fb.columns:
         df_fb_cleaned = df_fb.drop_duplicates(subset=["Visit_Id"], keep="first").copy()
     else:
@@ -586,6 +582,7 @@ else:
 
 today_date = ref_date
 yesterday_date = ref_date - timedelta(days=1)
+day_before_yesterday_date = ref_date - timedelta(days=2)
 tomorrow_date = ref_date + timedelta(days=1)
 
 # -----------------------------------------------------------------------------
@@ -664,7 +661,7 @@ df_v_filtered = df_v_filtered[
 cohort_baby_ids = df_v_filtered["Baby ID"].unique()
 df_b_filtered = df_b_filtered[df_b_filtered["Baby ID"].isin(cohort_baby_ids)]
 
-# Apply filters synchronously to Deduplicated Feedback Sheet (Based on Visit_Id single visits)
+# Apply filters synchronously to Deduplicated Feedback Sheet
 df_fb_filtered = pd.DataFrame()
 if has_feedback and df_fb_cleaned is not None:
     df_fb_filtered = df_fb_cleaned.copy()
@@ -722,10 +719,20 @@ kpi_total_ashas = df_b_filtered["ASHA"].nunique()
 kpi_total_phc = df_b_filtered["PHC"].nunique()
 kpi_total_subcentres = df_b_filtered["Subcentre"].nunique()
 
-v_yesterday = df_v_geo[df_v_geo["Due Date"] == yesterday_date]
-v_today = df_v_geo[df_v_geo["Due Date"] == today_date]
-v_tomorrow = df_v_geo[df_v_geo["Due Date"] == tomorrow_date]
+# Daily Monitoring Cadence Subsets:
+# 1. Day Before Yesterday (Parso)
+v_day_before_yesterday = df_v_geo[df_v_geo["Due Date"] == day_before_yesterday_date]
+kpi_dby_scheduled = len(v_day_before_yesterday)
+kpi_dby_completed = (v_day_before_yesterday["Visit Status"] == "Completed").sum()
+kpi_dby_missed = (v_day_before_yesterday["Visit Status"] == "Missed").sum()
+kpi_dby_completion_rate = (
+    (kpi_dby_completed / kpi_dby_scheduled * 100.0)
+    if kpi_dby_scheduled > 0
+    else 0.0
+)
 
+# 2. Yesterday
+v_yesterday = df_v_geo[df_v_geo["Due Date"] == yesterday_date]
 kpi_yest_scheduled = len(v_yesterday)
 kpi_yest_completed = (v_yesterday["Visit Status"] == "Completed").sum()
 kpi_yest_missed = (v_yesterday["Visit Status"] == "Missed").sum()
@@ -734,6 +741,10 @@ kpi_yest_completion_rate = (
     if kpi_yest_scheduled > 0
     else 0.0
 )
+
+# 3. Today & Tomorrow
+v_today = df_v_geo[df_v_geo["Due Date"] == today_date]
+v_tomorrow = df_v_geo[df_v_geo["Due Date"] == tomorrow_date]
 
 kpi_today_scheduled = len(v_today)
 kpi_tom_scheduled = len(v_tomorrow)
@@ -769,26 +780,26 @@ with r5:
 with r6:
     st.markdown(f'<div class="kpi-card" style="border-left: 3.5px solid #EF4444;"><div class="kpi-title">Videos Rejected</div><div class="kpi-value" style="color: #DC2626;">{kpi_videos_rejected}</div><div class="kpi-caption">Single Visits | Requires re-visit</div></div>', unsafe_allow_html=True)
 
-# --- Tier 2: Healthcare Infrastructure & Daily Cadence ---
-st.markdown('<div class="tier-header">⏱️ Healthcare Network & Operational Daily Schedule</div>', unsafe_allow_html=True)
+# --- Tier 2: Healthcare Infrastructure & Daily Cadence (Now Including Day Before Yesterday) ---
+st.markdown('<div class="tier-header">⏱️ Operational Daily Schedule & Healthcare Infrastructure</div>', unsafe_allow_html=True)
 d1, d2, d3, d4, d5, d6, d7, d8 = st.columns(8)
 
 with d1:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #0D9488;"><div class="kpi-title">Total ASHAs</div><div class="kpi-value" style="font-size: 19px; color: #0F766E;">{kpi_total_ashas:,}</div><div class="kpi-caption">Active workers</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #0D9488;"><div class="kpi-title">Total ASHAs</div><div class="kpi-value" style="font-size: 18px; color: #0F766E;">{kpi_total_ashas:,}</div><div class="kpi-caption">Facilities: {kpi_total_phc}</div></div>', unsafe_allow_html=True)
 with d2:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #3B82F6;"><div class="kpi-title">Facilities</div><div class="kpi-value" style="font-size: 19px; color: #1D4ED8;">{kpi_total_phc:,}</div><div class="kpi-caption">PHC / CHC</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #64748B;"><div class="kpi-title">Parso Sched.</div><div class="kpi-value" style="font-size: 18px; color: #334155;">{kpi_dby_scheduled:,}</div><div class="kpi-caption">{day_before_yesterday_date.strftime("%d-%b")}</div></div>', unsafe_allow_html=True)
 with d3:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #8B5CF6;"><div class="kpi-title">Subcentres</div><div class="kpi-value" style="font-size: 19px; color: #6D28D9;">{kpi_total_subcentres:,}</div><div class="kpi-caption">Coverage</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #EF4444;"><div class="kpi-title">Parso Missed</div><div class="kpi-value" style="font-size: 18px; color: #DC2626;">{kpi_dby_missed:,}</div><div class="kpi-caption">Done: {kpi_dby_completed} ({kpi_dby_completion_rate:.0f}%)</div></div>', unsafe_allow_html=True)
 with d4:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #64748B;"><div class="kpi-title">Yest. Sched.</div><div class="kpi-value" style="font-size: 19px; color: #334155;">{kpi_yest_scheduled:,}</div><div class="kpi-caption">{yesterday_date.strftime("%d-%b")}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #64748B;"><div class="kpi-title">Yest. Sched.</div><div class="kpi-value" style="font-size: 18px; color: #334155;">{kpi_yest_scheduled:,}</div><div class="kpi-caption">{yesterday_date.strftime("%d-%b")}</div></div>', unsafe_allow_html=True)
 with d5:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #10B981;"><div class="kpi-title">Yest. Done</div><div class="kpi-value" style="font-size: 19px; color: #059669;">{kpi_yest_completed:,}</div><div class="kpi-caption">Rate: {kpi_yest_completion_rate:.0f}%</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #EF4444;"><div class="kpi-title">Yest. Missed</div><div class="kpi-value" style="font-size: 18px; color: #DC2626;">{kpi_yest_missed:,}</div><div class="kpi-caption">Done: {kpi_yest_completed} ({kpi_yest_completion_rate:.0f}%)</div></div>', unsafe_allow_html=True)
 with d6:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #EF4444;"><div class="kpi-title">Yest. Missed</div><div class="kpi-value" style="font-size: 19px; color: #DC2626;">{kpi_yest_missed:,}</div><div class="kpi-caption">Overdue</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #10B981;"><div class="kpi-title">Total Subcentres</div><div class="kpi-value" style="font-size: 18px; color: #059669;">{kpi_total_subcentres:,}</div><div class="kpi-caption">Subcentre coverage</div></div>', unsafe_allow_html=True)
 with d7:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #F59E0B;"><div class="kpi-title">Today Sched.</div><div class="kpi-value" style="font-size: 19px; color: #D97706;">{kpi_today_scheduled:,}</div><div class="kpi-caption">{today_date.strftime("%d-%b")}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #F59E0B;"><div class="kpi-title">Today Sched.</div><div class="kpi-value" style="font-size: 18px; color: #D97706;">{kpi_today_scheduled:,}</div><div class="kpi-caption">{today_date.strftime("%d-%b")} (Due)</div></div>', unsafe_allow_html=True)
 with d8:
-    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #6366F1;"><div class="kpi-title">Tom. Sched.</div><div class="kpi-value" style="font-size: 19px; color: #4F46E5;">{kpi_tom_scheduled:,}</div><div class="kpi-caption">{tomorrow_date.strftime("%d-%b")} ({kpi_tom_babies_count})</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kpi-card" style="border-left: 3px solid #6366F1;"><div class="kpi-title">Tom. Sched.</div><div class="kpi-value" style="font-size: 18px; color: #4F46E5;">{kpi_tom_scheduled:,}</div><div class="kpi-caption">{tomorrow_date.strftime("%d-%b")} ({kpi_tom_babies_count})</div></div>', unsafe_allow_html=True)
 
 st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
@@ -806,45 +817,48 @@ tab_daily, tab_video, tab_reg_audit, tab_network, tab_baby_master, tab_trends, t
 ])
 
 cols_roster_display = ["Baby Display", "Baby ID", "Mother", "ASHA", "District", "PHC", "Subcentre", "Visit Stage", "Due Date"]
+df_dby_missed_roster = v_day_before_yesterday[v_day_before_yesterday["Visit Status"] == "Missed"].copy()
+df_dby_all_roster = v_day_before_yesterday.copy()
 df_yest_missed_roster = v_yesterday[v_yesterday["Visit Status"] == "Missed"].copy()
 df_today_sched_roster = v_today.copy()
 df_tom_sched_roster = v_tomorrow.copy()
 
 # TAB 1: Daily Visit Monitoring
 with tab_daily:
-    st.subheader("⏱️ Daily Visit Overview: Yesterday, Today & Tomorrow Comparisons")
+    st.subheader("⏱️ Daily Visit Overview: 4-Day Comparative Performance")
     row1_c1, row1_c2 = st.columns(2)
 
     with row1_c1:
-        st.markdown(f"**1. Yesterday's Performance: Scheduled vs. Completed vs. Missed ({yesterday_date.strftime('%d-%b-%Y')})**")
-        df_y_chart = pd.DataFrame({
-            "Metric": ["Scheduled", "Completed", "Missed"],
-            "Visits": [kpi_yest_scheduled, kpi_yest_completed, kpi_yest_missed],
-        })
+        st.markdown(f"**1. Historical Daily Performance: Scheduled vs. Completed vs. Missed**")
+        df_hist_chart = pd.DataFrame([
+            {"Day": f"Parso ({day_before_yesterday_date.strftime('%d-%b')})", "Scheduled": kpi_dby_scheduled, "Completed": kpi_dby_completed, "Missed": kpi_dby_missed},
+            {"Day": f"Yesterday ({yesterday_date.strftime('%d-%b')})", "Scheduled": kpi_yest_scheduled, "Completed": kpi_yest_completed, "Missed": kpi_yest_missed},
+        ])
         if HAS_PLOTLY:
-            fig_yest = px.bar(
-                df_y_chart,
-                x="Metric",
-                y="Visits",
-                color="Metric",
-                color_discrete_map={"Scheduled": "#3B82F6", "Completed": "#10B981", "Missed": "#EF4444"},
-                text="Visits",
-                height=260,
-            )
-            fig_yest.update_layout(margin=dict(l=15, r=15, t=25, b=15), showlegend=False, yaxis_title="Visits", plot_bgcolor="rgba(248,250,252,0.5)")
-            st.plotly_chart(fig_yest, use_container_width=True)
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Bar(name="Scheduled", x=df_hist_chart["Day"], y=df_hist_chart["Scheduled"], marker_color="#3B82F6", text=df_hist_chart["Scheduled"], textposition="auto"))
+            fig_hist.add_trace(go.Bar(name="Completed", x=df_hist_chart["Day"], y=df_hist_chart["Completed"], marker_color="#10B981", text=df_hist_chart["Completed"], textposition="auto"))
+            fig_hist.add_trace(go.Bar(name="Missed", x=df_hist_chart["Day"], y=df_hist_chart["Missed"], marker_color="#EF4444", text=df_hist_chart["Missed"], textposition="auto"))
+            fig_hist.update_layout(barmode="group", height=260, margin=dict(l=15, r=15, t=25, b=15), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), yaxis_title="Visits", plot_bgcolor="rgba(248,250,252,0.5)")
+            st.plotly_chart(fig_hist, use_container_width=True)
         else:
-            st.bar_chart(df_y_chart.set_index("Metric")["Visits"])
+            st.bar_chart(df_hist_chart.set_index("Day")[["Scheduled", "Completed", "Missed"]])
 
     with row1_c2:
-        st.markdown("**2. Visit Schedule Comparison: Yesterday vs. Today vs. Tomorrow**")
+        st.markdown("**2. Scheduled Milestone Comparison Across All 4 Days**")
         df_comp = pd.DataFrame({
             "Day": [
+                f"Parso ({day_before_yesterday_date.strftime('%d-%b')})",
                 f"Yesterday ({yesterday_date.strftime('%d-%b')})",
                 f"Today ({today_date.strftime('%d-%b')})",
                 f"Tomorrow ({tomorrow_date.strftime('%d-%b')})",
             ],
-            "Scheduled Visits": [kpi_yest_scheduled, kpi_today_scheduled, kpi_tom_scheduled],
+            "Scheduled Visits": [
+                kpi_dby_scheduled,
+                kpi_yest_scheduled,
+                kpi_today_scheduled,
+                kpi_tom_scheduled,
+            ],
         })
         if HAS_PLOTLY:
             fig_comp = px.bar(
@@ -853,7 +867,7 @@ with tab_daily:
                 y="Scheduled Visits",
                 text="Scheduled Visits",
                 color="Day",
-                color_discrete_sequence=["#64748B", "#F59E0B", "#6366F1"],
+                color_discrete_sequence=["#94A3B8", "#64748B", "#F59E0B", "#6366F1"],
                 height=260,
             )
             fig_comp.update_layout(margin=dict(l=15, r=15, t=25, b=15), showlegend=False, yaxis_title="Visits", plot_bgcolor="rgba(248,250,252,0.5)")
@@ -862,10 +876,35 @@ with tab_daily:
             st.bar_chart(df_comp.set_index("Day")["Scheduled Visits"])
 
     st.markdown("---")
-    st.markdown('<div class="tier-header">📋 Baby-Wise Detailed Visit Rosters & Direct Exports</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tier-header">📋 Baby-Wise Detailed Daily Rosters & Direct Exports</div>', unsafe_allow_html=True)
 
-    # Section A: Yesterday's Missed Visits
-    st.markdown(f'<div class="sub-section-header">A. Yesterday\'s Missed Visits ({yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
+    # Section A0: Day Before Yesterday's (Parso) Visits
+    st.markdown(f'<div class="sub-section-header">A. Day Before Yesterday\'s (Parso) Visits ({day_before_yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
+    dby_info_col, dby_btn_col1, dby_btn_col2 = st.columns([2.2, 0.9, 0.9])
+    with dby_info_col:
+        st.markdown(
+            f"**Scheduled Visits:** `{kpi_dby_scheduled}` &nbsp;|&nbsp; "
+            f"**Completed Visits:** `{kpi_dby_completed}` &nbsp;|&nbsp; "
+            f"**Missed Visits:** `{kpi_dby_missed}` (Affected Babies: `{df_dby_missed_roster['Baby ID'].nunique() if not df_dby_missed_roster.empty else 0}`)"
+        )
+    with dby_btn_col1:
+        if not df_dby_all_roster.empty:
+            dby_excel_bytes = generate_single_table_excel(df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), sheet_name="Day_Before_Yesterday")
+            st.download_button(label="📥 Excel (.xlsx)", data=dby_excel_bytes, file_name=f"Day_Before_Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="btn_dby_excel", use_container_width=True)
+    with dby_btn_col2:
+        if not df_dby_all_roster.empty:
+            dby_pdf_bytes = generate_pdf_report(df_export=df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}), columns_to_show=["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Visit Status"], report_title=f"HBNC Day Before Yesterday Visits ({day_before_yesterday_date.strftime('%d-%b-%Y')})", active_filters_desc=active_filters_str)
+            st.download_button(label="📄 PDF (.pdf)", data=dby_pdf_bytes, file_name=f"Day_Before_Yesterday_Visits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf", mime="application/pdf", key="btn_dby_pdf", use_container_width=True)
+
+    if not df_dby_all_roster.empty:
+        st.dataframe(df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block / PHC Facility", "Due Date": "Scheduled Date", "Visit Status": "Outcome"}), use_container_width=True, hide_index=True)
+    else:
+        st.info(f"ℹ️ No visits were scheduled on the day before yesterday ({day_before_yesterday_date.strftime('%d-%b-%Y')}) under the current filter selection.")
+
+    st.markdown("---")
+
+    # Section B: Yesterday's Missed Visits
+    st.markdown(f'<div class="sub-section-header">B. Yesterday\'s Missed Visits ({yesterday_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
     ym_info_col, ym_btn_col1, ym_btn_col2 = st.columns([2.2, 0.9, 0.9])
     with ym_info_col:
         st.markdown(f"**Total Missed Visits:** `{len(df_yest_missed_roster)}` &nbsp;|&nbsp; **Affected Unique Babies:** `{df_yest_missed_roster['Baby ID'].nunique() if not df_yest_missed_roster.empty else 0}`")
@@ -885,8 +924,8 @@ with tab_daily:
 
     st.markdown("---")
 
-    # Section B: Today's Scheduled Visits
-    st.markdown(f'<div class="sub-section-header">B. Today\'s Scheduled Visits ({today_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
+    # Section C: Today's Scheduled Visits
+    st.markdown(f'<div class="sub-section-header">C. Today\'s Scheduled Visits ({today_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
     t_info_col, t_btn_col1, t_btn_col2 = st.columns([2.2, 0.9, 0.9])
     with t_info_col:
         st.markdown(f"**Total Scheduled Visits:** `{len(df_today_sched_roster)}` &nbsp;|&nbsp; **Unique Babies Scheduled:** `{df_today_sched_roster['Baby ID'].nunique() if not df_today_sched_roster.empty else 0}`")
@@ -906,8 +945,8 @@ with tab_daily:
 
     st.markdown("---")
 
-    # Section C: Tomorrow's Scheduled Visits
-    st.markdown(f'<div class="sub-section-header">C. Tomorrow\'s Scheduled Visits ({tomorrow_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
+    # Section D: Tomorrow's Scheduled Visits
+    st.markdown(f'<div class="sub-section-header">D. Tomorrow\'s Scheduled Visits ({tomorrow_date.strftime("%d-%b-%Y")})</div>', unsafe_allow_html=True)
     tom_info_col, tom_btn_col1, tom_btn_col2 = st.columns([2.2, 0.9, 0.9])
     with tom_info_col:
         st.markdown(f"**Total Scheduled Visits:** `{len(df_tom_sched_roster)}` &nbsp;|&nbsp; **Unique Babies Expected:** `{df_tom_sched_roster['Baby ID'].nunique() if not df_tom_sched_roster.empty else 0}`")
@@ -967,9 +1006,7 @@ with tab_video:
 
         st.markdown("---")
         
-        # ---------------------------------------------------------------------
-        # DEDICATED REPORT: REJECTED VIDEOS (Visit_Id Deduplicated)
-        # ---------------------------------------------------------------------
+        # Dedicated Rejected Videos Report
         st.markdown('<div class="tier-header">🚫 Rejected Videos Actionable Report (Column E Visit_Id Deduplicated)</div>', unsafe_allow_html=True)
         
         df_rejected_report = df_fb_filtered[
@@ -1166,6 +1203,7 @@ with tab_export:
         st.markdown("#### 📗 Multi-Sheet Excel Workbook (.xlsx)")
         export_sheets = {
             "Baby_Master_Filtered": df_b_filtered[baby_master_cols].rename(columns={"Baby Display": "Baby Name"}),
+            "Day_Before_Yesterday_Visits": df_dby_all_roster[cols_roster_display + ["Visit Status"]].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
             "Yesterday_Missed": df_yest_missed_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
             "Today_Scheduled": df_today_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
             "Tomorrow_Scheduled": df_tom_sched_roster[cols_roster_display].rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"}),
@@ -1183,6 +1221,7 @@ with tab_export:
     with d_col2:
         st.markdown("#### 📕 Landscape Printable PDF Report (.pdf)")
         export_choices = [
+            "Day Before Yesterday's (Parso) Visits",
             "Yesterday's Missed Visits",
             "Today's Scheduled Visits",
             "Tomorrow's Scheduled Visits",
@@ -1195,7 +1234,11 @@ with tab_export:
             
         pdf_view_choice = st.radio("Select Report Content to Export:", export_choices, index=0)
 
-        if pdf_view_choice == "Yesterday's Missed Visits":
+        if pdf_view_choice == "Day Before Yesterday's (Parso) Visits":
+            pdf_source_df = df_dby_all_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
+            cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date", "Visit Status"]
+            pdf_title = f"HBNC Day Before Yesterday Visits ({day_before_yesterday_date.strftime('%d-%b-%Y')})"
+        elif pdf_view_choice == "Yesterday's Missed Visits":
             pdf_source_df = df_yest_missed_roster.rename(columns={"Baby Display": "Baby Name", "PHC": "Block/PHC"})
             cols_to_print = ["Baby Name", "Baby ID", "Mother", "ASHA", "Block/PHC", "Subcentre", "Visit Stage", "Due Date"]
             pdf_title = f"HBNC Yesterday's Missed Visits ({yesterday_date.strftime('%d-%b-%Y')})"
